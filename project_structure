@@ -1,0 +1,16 @@
+faucet_project/
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+├── manage.py
+├── faucet_project/
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+└── faucet/
+    ├── __init__.py
+    ├── models.py
+    ├── serializers.py
+    ├── views.py
+    └── urls.py 
