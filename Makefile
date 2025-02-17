@@ -1,4 +1,4 @@
-.PHONY: install run test lint format clean help docker-up docker-down venv db-up db-down
+.PHONY: install run test lint format clean help docker-up docker-down venv db-up db-down run-django run-streamlit check-ports
 
 PYTHON := python3.11
 PIP := pip
@@ -22,6 +22,8 @@ help:
 	@echo "  make clean      - Remove Python file artifacts and virtual environment"
 	@echo "  make docker-up  - Start all Docker containers"
 	@echo "  make docker-down - Stop all Docker containers"
+	@echo "  make run-django - Run Django development server"
+	@echo "  make run-streamlit - Run Streamlit app"
 
 venv:
 	$(PYTHON) -m venv $(VENV_NAME)
@@ -41,10 +43,53 @@ db-down:
 	$(DOCKER_COMPOSE_DB) down
 	sleep 2  # Wait for container to stop properly
 
-run:
-	$(PYTHON) manage.py migrate
-	$(PYTHON) manage.py collectstatic --noinput
-	$(PYTHON) manage.py runserver 0.0.0.0:8000
+run-django:
+	@echo "Starting Django at http://localhost:8000..."
+	$(VENV_BIN)/python manage.py migrate
+	$(VENV_BIN)/python manage.py collectstatic --noinput
+	$(VENV_BIN)/python manage.py runserver 0.0.0.0:8000
+
+run-streamlit:
+	@echo "Starting Streamlit at http://localhost:8501..."
+	$(VENV_BIN)/streamlit run faucet/streamlit_app.py \
+		--server.port 8501 \
+		--server.address 0.0.0.0 \
+		--browser.serverAddress localhost \
+		--server.baseUrlPath "" \
+		--server.enableCORS false \
+		--server.enableXsrfProtection false \
+		--theme.base light
+
+check-ports:
+	@echo "Checking if ports are available..."
+	@lsof -i:8000 -t | xargs kill -9 2>/dev/null || true
+	@lsof -i:8501 -t | xargs kill -9 2>/dev/null || true
+	@sleep 1
+
+run: check-ports
+	@if command -v tmux >/dev/null 2>&1; then \
+		echo "Starting services..." && \
+		echo "Django will be available at: http://localhost:8000" && \
+		echo "Streamlit will be available at: http://localhost:8501" && \
+		tmux new-session -d -s faucet "source $(VENV_NAME)/bin/activate && make run-django" && \
+		tmux split-window -h "source $(VENV_NAME)/bin/activate && make run-streamlit" && \
+		tmux -2 attach-session -d; \
+	else \
+		echo "Starting services in separate terminals..." && \
+		echo "Django will be available at: http://localhost:8000" && \
+		echo "Streamlit will be available at: http://localhost:8501" && \
+		(source $(VENV_NAME)/bin/activate && make run-django & source $(VENV_NAME)/bin/activate && make run-streamlit); \
+	fi
+
+stop:
+	@if command -v tmux >/dev/null 2>&1; then \
+		tmux kill-session -t faucet 2>/dev/null || true; \
+	else \
+		echo "Stopping services..." && \
+		lsof -i:8000 -t | xargs kill -9 2>/dev/null || true && \
+		lsof -i:8501 -t | xargs kill -9 2>/dev/null || true && \
+		echo "Services stopped"; \
+	fi
 
 test:
 	if [ -d "/app" ]; then \
@@ -91,3 +136,5 @@ docker-up:
 
 docker-down:
 	$(DOCKER_COMPOSE) down 
+
+setup: install migrate run 

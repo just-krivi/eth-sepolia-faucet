@@ -1,9 +1,10 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
 )
+from faucet.streamlit_view import StreamlitProxyView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -21,4 +22,6 @@ urlpatterns = [
             ]
         ),
     ),
+    # Catch all other URLs and send them to Streamlit
+    re_path(r"^(?P<path>.*)$", StreamlitProxyView.as_view(), name="home"),
 ]

@@ -1,15 +1,17 @@
 # Ethereum Sepolia Faucet API
 
 A Django REST API service that provides a faucet for Sepolia testnet ETH. The service allows users to request small amounts of test ETH with built-in rate limiting and transaction tracking.
-Source of funds is from a pre-funded wallet.
+Source of funds is from a pre-funded wallet that is used to fund the faucet and is configurable.
+
+Streamlit app provides a nice UI to interact with the API and display the statistics of the faucet.
 
 ## Features
 
 - Request Sepolia ETH (configurable amount, default: 0.0001 ETH)
-- Rate limiting by IP address and wallet address
+- Rate limiting by IP address and wallet address (default: 1 min)
 - Transaction tracking and 24-hour statistics
 - Dockerized application with PostgreSQL database
-- Configurable via environment variables
+- Streamlit UI to interact with the API and display the statistics of the faucet
 - Tested with Sepolia testnet
 - Interactive API documentation (Swagger UI)
 
@@ -17,7 +19,9 @@ Source of funds is from a pre-funded wallet.
 
 - Docker and Docker Compose
 - Python 3.11+
-- A wallet with Sepolia ETH
+- A wallet with Sepolia ETH:
+  - You can use any wallet that supports Sepolia testnet.
+  - To prefund the wallet, you can use any Sepolia ETH faucet or use a wallet that has some Sepolia ETH. E.g. https://cloud.google.com/application/web3/faucet/ethereum/sepolia
 - Infura account or other Ethereum node provider
 
 ## Configuration
@@ -52,6 +56,7 @@ make docker-up
 ```
 
 The API will be available at `http://localhost:8000`
+Streamlit will be available at `http://localhost:8501`
 
 ## Running Locally
 
@@ -81,7 +86,8 @@ To stop the database:
 make db-down
 ```
 
-The API will be available at `http://localhost:8000`
+The API will be available at `http://localhost:8000/api/schema/swagger-ui/`
+Streamlit will be available at `http://localhost:8501`
 
 ## API Documentation
 
@@ -119,7 +125,7 @@ curl -X POST http://localhost:8000/api/fund \
 ```
 
 **Response:**
-```
+```json
 {"transaction_hash": "0x1234567890abcdef"}
 ```
 
@@ -132,7 +138,7 @@ Get the number of successful and failed transactions in the last 24 hours.
 curl http://localhost:8000/api/stats
 ```
 **Response:**
-```
+```json
 {"total_transactions":1,"last_24h_transactions":1,"successful_transactions":1,"failed_transactions":0}
 ```
 

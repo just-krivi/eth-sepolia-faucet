@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "drf_spectacular_sidecar",
     "faucet.apps.FaucetConfig",  # Update this line
+    "streamlit.web.bootstrap",
 ]
 
 MIDDLEWARE = [
