@@ -84,13 +84,13 @@ The API will be available at `http://localhost:8000`
 
 ## API Endpoints
 
-### 1. Request Funds (POST /faucet/fund/)
+### 1. Request Funds (POST /faucet/fund)
 
 Request Sepolia ETH to be sent to your wallet.
 
 **Request:**
 ```
-curl -X POST http://localhost:8000/faucet/fund/ \
+curl -X POST http://localhost:8000/faucet/fund \
 -H "Content-Type: application/json" \
 -d '{"wallet_address": "0x9F184A0c66EEe3fAe5DeeAc5cd741B6D63652848"}'   
 ```
@@ -100,24 +100,53 @@ curl -X POST http://localhost:8000/faucet/fund/ \
 {"transaction_hash": "0x1234567890abcdef"}
 ```
 
-### 2. Get Statistics (GET /faucet/stats/)
+### 2. Get Statistics (GET /faucet/stats)
 
 Get the number of successful and failed transactions in the last 24 hours.
 
 **Request:**
 ```
-curl http://localhost:8000/faucet/stats/
+curl http://localhost:8000/faucet/stats
 ```
 **Response:**
 ```
 {"total_transactions":1,"last_24h_transactions":1,"successful_transactions":1,"failed_transactions":0}
 ```
 
+### 3. List Transactions (GET /faucet/transactions)
+
+Get all transactions with optional filtering.
+
+**Request:**
+```bash
+# Get all transactions
+curl http://localhost:8000/faucet/transactions
+
+# Filter by wallet
+curl http://localhost:8000/faucet/transactions?wallet=0x123...
+
+# Filter by date range
+curl http://localhost:8000/faucet/transactions?from_date=2024-02-17T00:00:00Z&to_date=2024-02-17T23:59:59Z
+```
+
+**Response:**
+```json
+[
+  {
+    "transaction_hash": "0x123...",
+    "wallet_address": "0xabc...",
+    "amount": "0.0001",
+    "status": "success",
+    "created_at": "2024-02-17T16:30:13Z"
+  }
+]
+```
+
 ## Running Tests
 
 ### With Docker:
-```                 
-docker-compose exec web python manage.py test or docker-compose exec web shell make test
+```
+docker-compose exec web python manage.py test or docker-compose exec web make test
 ```
 
 ### Locally:
@@ -126,3 +155,23 @@ make test or pytest
 ```
 
 
+## Migrations
+
+To generate a new migration:
+
+```bash
+# Inside Docker container
+docker-compose exec web python manage.py makemigrations
+
+# Locally
+python manage.py makemigrations
+```
+
+To apply migrations:
+
+```bash
+# Inside Docker container
+docker-compose exec web python manage.py migrate
+
+python manage.py migrate
+```

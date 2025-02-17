@@ -93,3 +93,6 @@ REST_FRAMEWORK = {
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = True  # For development, restrict this in production
+
+# Make trailing slashes optional
+APPEND_SLASH = False

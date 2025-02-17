@@ -9,7 +9,13 @@ class WalletAddressSerializer(serializers.Serializer):
 class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
-        fields = "__all__"
+        fields = [
+            "transaction_hash",
+            "amount",
+            "status",
+            "created_at",
+            "wallet_address",
+        ]
 
 
 class StatsSerializer(serializers.Serializer):

@@ -46,13 +46,25 @@ run:
 	$(PYTHON) manage.py runserver 0.0.0.0:8000
 
 test:
-	DJANGO_SETTINGS_MODULE=faucet_project.test_settings PYTHONPATH=$(PWD) pytest
+	if [ -d "/app" ]; then \
+		DJANGO_SETTINGS_MODULE=faucet_project.test_settings python -m pytest; \
+	else \
+		DJANGO_SETTINGS_MODULE=faucet_project.test_settings PYTHONPATH=$(PWD) python -m pytest; \
+	fi
 
 test-v:
-	DJANGO_SETTINGS_MODULE=faucet_project.test_settings PYTHONPATH=$(PWD) pytest -v
+	if [ -d "/app" ]; then \
+		DJANGO_SETTINGS_MODULE=faucet_project.test_settings python -m pytest -v; \
+	else \
+		DJANGO_SETTINGS_MODULE=faucet_project.test_settings PYTHONPATH=$(PWD) python -m pytest -v; \
+	fi
 
 test-cov:
-	DJANGO_SETTINGS_MODULE=faucet_project.test_settings PYTHONPATH=$(PWD) pytest --cov=faucet --cov-report=term-missing
+	if [ -d "/app" ]; then \
+		DJANGO_SETTINGS_MODULE=faucet_project.test_settings python -m pytest --cov=faucet --cov-report=term-missing; \
+	else \
+		DJANGO_SETTINGS_MODULE=faucet_project.test_settings PYTHONPATH=$(PWD) python -m pytest --cov=faucet --cov-report=term-missing; \
+	fi
 
 lint:
 	flake8 . --max-line-length=100 --exclude=venv,migrations,.git,__pycache__

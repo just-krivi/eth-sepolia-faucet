@@ -1,10 +1,13 @@
 from django.test import TestCase, override_settings
 from django.urls import reverse
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APITestCase
 from rest_framework import status
 from unittest.mock import patch, MagicMock
 from web3 import Web3
 from web3.exceptions import TransactionNotFound
+from faucet.models import Transaction
+from django.utils import timezone
+from datetime import timedelta
 
 
 @override_settings(
@@ -157,3 +160,86 @@ class FaucetAPITests(TestCase):
         self.assertEqual(response.data["last_24h_transactions"], 0)
         self.assertEqual(response.data["successful_transactions"], 0)
         self.assertEqual(response.data["failed_transactions"], 0)
+
+
+class TransactionListTests(APITestCase):
+    def setUp(self):
+        # Create transaction1 (newer)
+        self.now = timezone.now()
+        self.transaction1 = Transaction.objects.create(
+            transaction_hash="0x123",
+            wallet_address="0xabc",
+            amount=0.1,
+            status="success",
+            ip_address="127.0.0.1",
+        )
+
+        # Create transaction2 (older)
+        one_day_ago = self.now - timedelta(days=1)
+        self.transaction2 = Transaction.objects.create(
+            transaction_hash="0x456",
+            wallet_address="0xdef",
+            amount=0.2,
+            status="failed",
+            ip_address="127.0.0.1",
+        )
+
+        # Manually update created_at fields
+        Transaction.objects.filter(pk=self.transaction1.pk).update(created_at=self.now)
+        Transaction.objects.filter(pk=self.transaction2.pk).update(
+            created_at=one_day_ago
+        )
+
+    def test_list_all_transactions(self):
+        """Test retrieving all transactions without filters"""
+        url = reverse("transaction-list")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+
+        # Verify the most recent transaction is first
+        self.assertEqual(response.data[0]["transaction_hash"], "0x123")
+        self.assertEqual(response.data[1]["transaction_hash"], "0x456")
+
+    def test_filter_by_wallet(self):
+        """Test filtering transactions by wallet address"""
+        url = reverse("transaction-list")
+        response = self.client.get(url, {"wallet": "0xabc"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["wallet_address"], "0xabc")
+
+    def test_filter_by_date_range(self):
+        """Test filtering transactions by date range"""
+        from_date = (self.now - timedelta(minutes=5)).isoformat()
+        to_date = (self.now + timedelta(minutes=5)).isoformat()
+
+        url = reverse("transaction-list")
+        response = self.client.get(url, {"from_date": from_date, "to_date": to_date})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["transaction_hash"], "0x123")
+
+    def test_invalid_date_format(self):
+        """Test invalid date format returns 400"""
+        url = reverse("transaction-list")
+        response = self.client.get(url, {"from_date": "invalid-date"})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("error", response.data)
+
+    def test_combined_filters(self):
+        """Test combining multiple filters"""
+        now = timezone.now()
+        from_date = (now - timedelta(hours=12)).isoformat()
+
+        url = reverse("transaction-list")
+        response = self.client.get(url, {"from_date": from_date, "wallet": "0xabc"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["transaction_hash"], "0x123")
+        self.assertEqual(response.data[0]["wallet_address"], "0xabc")

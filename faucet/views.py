@@ -9,8 +9,15 @@ from django_ratelimit.decorators import ratelimit
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from .models import Transaction
-from .serializers import WalletAddressSerializer, StatsSerializer  # noqa
+from .serializers import (
+    WalletAddressSerializer,
+    StatsSerializer,
+    TransactionSerializer,
+)  # noqa
 from rest_framework.permissions import AllowAny
+from django.utils.dateparse import parse_datetime
+from rest_framework.decorators import api_view, permission_classes
+from django.db.models import Q
 
 
 class FaucetFundView(APIView):
@@ -109,3 +116,67 @@ class FaucetStatsView(APIView):
         }
 
         return Response(stats, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def transaction_list(request):
+    """
+    List all transactions with optional filtering by date range and wallet address.
+    """
+    queryset = Transaction.objects.all()
+
+    # Filter by wallet address
+    wallet = request.query_params.get("wallet", None)
+    if wallet:
+        queryset = queryset.filter(wallet_address__iexact=wallet)
+
+    # Filter by date range
+    from_date = request.query_params.get("from_date", None)
+    to_date = request.query_params.get("to_date", None)
+
+    if from_date:
+        try:
+            from_date = parse_datetime(from_date)
+            if from_date:
+                queryset = queryset.filter(created_at__gte=from_date)
+            else:
+                return Response(
+                    {
+                        "error": "Invalid from_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        except (ValueError, TypeError):
+            return Response(
+                {
+                    "error": "Invalid from_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    if to_date:
+        try:
+            to_date = parse_datetime(to_date)
+            if to_date:
+                queryset = queryset.filter(created_at__lte=to_date)
+            else:
+                return Response(
+                    {
+                        "error": "Invalid to_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        except (ValueError, TypeError):
+            return Response(
+                {
+                    "error": "Invalid to_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    # Always order by created_at descending (newest first)
+    queryset = queryset.order_by("-created_at")
+
+    serializer = TransactionSerializer(queryset, many=True)
+    return Response(serializer.data)
