@@ -11,6 +11,7 @@ Source of funds is from a pre-funded wallet.
 - Dockerized application with PostgreSQL database
 - Configurable via environment variables
 - Tested with Sepolia testnet
+- Interactive API documentation (Swagger UI)
 
 ## Prerequisites
 
@@ -82,15 +83,37 @@ make db-down
 
 The API will be available at `http://localhost:8000`
 
+## API Documentation
+
+The API documentation is available in two formats:
+
+1. Interactive Swagger UI:
+```
+http://localhost:8000/api/schema/swagger-ui/
+```
+
+2. Raw OpenAPI Schema:
+```
+http://localhost:8000/api/schema/
+```
+
+
+The documentation includes:
+- Endpoint descriptions
+- Request/response schemas
+- Example requests
+- Available query parameters
+- Response codes
+
 ## API Endpoints
 
-### 1. Request Funds (POST /faucet/fund)
+### 1. Request Funds (POST /api/fund)
 
 Request Sepolia ETH to be sent to your wallet.
 
 **Request:**
 ```
-curl -X POST http://localhost:8000/faucet/fund \
+curl -X POST http://localhost:8000/api/fund \
 -H "Content-Type: application/json" \
 -d '{"wallet_address": "0x9F184A0c66EEe3fAe5DeeAc5cd741B6D63652848"}'   
 ```
@@ -100,33 +123,33 @@ curl -X POST http://localhost:8000/faucet/fund \
 {"transaction_hash": "0x1234567890abcdef"}
 ```
 
-### 2. Get Statistics (GET /faucet/stats)
+### 2. Get Statistics (GET /api/stats)
 
 Get the number of successful and failed transactions in the last 24 hours.
 
 **Request:**
 ```
-curl http://localhost:8000/faucet/stats
+curl http://localhost:8000/api/stats
 ```
 **Response:**
 ```
 {"total_transactions":1,"last_24h_transactions":1,"successful_transactions":1,"failed_transactions":0}
 ```
 
-### 3. List Transactions (GET /faucet/transactions)
+### 3. List Transactions (GET /api/transactions)
 
 Get all transactions with optional filtering.
 
 **Request:**
 ```bash
 # Get all transactions
-curl http://localhost:8000/faucet/transactions
+curl http://localhost:8000/api/transactions
 
 # Filter by wallet
-curl http://localhost:8000/faucet/transactions?wallet=0x123...
+curl http://localhost:8000/api/transactions?wallet=0x123...
 
 # Filter by date range
-curl http://localhost:8000/faucet/transactions?from_date=2024-02-17T00:00:00Z&to_date=2024-02-17T23:59:59Z
+curl http://localhost:8000/api/transactions?from_date=2024-02-17T00:00:00Z&to_date=2024-02-17T23:59:59Z
 ```
 
 **Response:**

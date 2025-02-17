@@ -43,6 +43,7 @@ db-down:
 
 run:
 	$(PYTHON) manage.py migrate
+	$(PYTHON) manage.py collectstatic --noinput
 	$(PYTHON) manage.py runserver 0.0.0.0:8000
 
 test:

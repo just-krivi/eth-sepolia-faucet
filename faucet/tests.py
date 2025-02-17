@@ -6,8 +6,10 @@ from unittest.mock import patch, MagicMock
 from web3 import Web3
 from web3.exceptions import TransactionNotFound
 from faucet.models import Transaction
+from faucet.schemas import TransactionSerializer
 from django.utils import timezone
 from datetime import timedelta
+from decimal import Decimal
 
 
 @override_settings(
@@ -20,6 +22,7 @@ from datetime import timedelta
 )
 @patch("django.db.models.Model.save", MagicMock())
 @patch("django.db.models.Model.delete", MagicMock())
+@patch("faucet.views.get_usage")
 class FaucetAPITests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -36,11 +39,6 @@ class FaucetAPITests(TestCase):
         self.mock_transaction = self.transaction_patcher.start()
         self.mock_transaction.objects = MagicMock()
 
-        # Mock rate limiter
-        self.ratelimit_patcher = patch("faucet.views.ratelimit")
-        self.mock_ratelimit = self.ratelimit_patcher.start()
-        self.mock_ratelimit.return_value = lambda func: func
-
         # Mock Web3
         self.web3_patcher = patch("faucet.views.Web3")
         self.mock_web3 = self.web3_patcher.start()
@@ -48,24 +46,14 @@ class FaucetAPITests(TestCase):
         self.mock_web3.HTTPProvider.return_value = MagicMock()
         self.mock_web3.return_value.eth = self.mock_eth
 
-        # Mock serializer
-        self.serializer_patcher = patch("faucet.views.WalletAddressSerializer")
-        self.mock_serializer = self.serializer_patcher.start()
-        self.mock_serializer.return_value = MagicMock()
-
     def tearDown(self):
         self.transaction_patcher.stop()
-        self.ratelimit_patcher.stop()
         self.web3_patcher.stop()
-        self.serializer_patcher.stop()
 
-    def test_fund_success(self):
+    def test_fund_success(self, mock_get_usage):
         """Test successful ETH funding request"""
-        # Mock serializer validation
-        self.mock_serializer.return_value.is_valid.return_value = True
-        self.mock_serializer.return_value.validated_data = {
-            "wallet_address": self.valid_wallet
-        }
+        # Mock rate limit check
+        mock_get_usage.return_value = {"should_limit": False}
 
         # Mock Web3 responses
         self.mock_eth.gas_price = 20000000000
@@ -86,13 +74,9 @@ class FaucetAPITests(TestCase):
         )  # Compare without '0x'
         self.mock_transaction.objects.create.assert_called_once()
 
-    def test_fund_invalid_wallet(self):
+    def test_fund_invalid_wallet(self, mock_get_usage):
         """Test funding request with invalid wallet address"""
-        # Mock serializer validation failure
-        self.mock_serializer.return_value.is_valid.return_value = False
-        self.mock_serializer.return_value.errors = {
-            "wallet_address": ["Invalid wallet address"]
-        }
+        mock_get_usage.return_value = {"should_limit": False}
 
         response = self.client.post(
             self.fund_url, {"wallet_address": "invalid_address"}, format="json"
@@ -101,10 +85,10 @@ class FaucetAPITests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.mock_transaction.objects.create.assert_not_called()
 
-    def test_fund_rate_limited(self):
+    def test_fund_rate_limited(self, mock_get_usage):
         """Test rate limiting for repeated requests"""
-        # Mock recent successful transaction
-        self.mock_transaction.objects.filter.return_value.exists.return_value = True
+        # Mock rate limit check
+        mock_get_usage.return_value = {"should_limit": True}
 
         response = self.client.post(
             self.fund_url, {"wallet_address": self.valid_wallet}, format="json"
@@ -114,8 +98,9 @@ class FaucetAPITests(TestCase):
         self.assertIn("error", response.data)
         self.mock_transaction.objects.create.assert_not_called()
 
-    def test_fund_transaction_failure(self):
+    def test_fund_transaction_failure(self, mock_get_usage):
         """Test handling of failed blockchain transaction"""
+        mock_get_usage.return_value = {"should_limit": False}
         # Mock Web3 error
         self.mock_eth.send_raw_transaction.side_effect = TransactionNotFound(
             "Transaction failed"
@@ -133,7 +118,7 @@ class FaucetAPITests(TestCase):
         # Verify failed transaction was recorded
         self.mock_transaction.objects.create.assert_called_once()
 
-    def test_stats_success(self):
+    def test_stats_success(self, mock_get_usage):
         """Test successful stats retrieval"""
         # Mock transaction statistics
         self.mock_transaction.objects.count.return_value = 100
@@ -147,7 +132,7 @@ class FaucetAPITests(TestCase):
         self.assertEqual(response.data["successful_transactions"], 50)
         self.assertEqual(response.data["failed_transactions"], 50)
 
-    def test_stats_empty(self):
+    def test_stats_empty(self, mock_get_usage):
         """Test stats retrieval with no transactions"""
         # Mock empty transaction data
         self.mock_transaction.objects.count.return_value = 0
@@ -243,3 +228,161 @@ class TransactionListTests(APITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["transaction_hash"], "0x123")
         self.assertEqual(response.data[0]["wallet_address"], "0xabc")
+
+
+@patch("faucet.views.get_usage")
+class SchemaValidationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_invalid_wallet_format(self, mock_get_usage):
+        """Test wallet address format validation"""
+        mock_get_usage.return_value = {"should_limit": False}
+        invalid_wallets = [
+            "not-a-wallet",  # Wrong format
+            "0xinvalid",  # Too short
+            "0x" + "g" * 40,  # Invalid hex
+        ]
+
+        for wallet in invalid_wallets:
+            response = self.client.post(
+                reverse("faucet-fund"), {"wallet_address": wallet}, format="json"
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertIn("wallet_address", response.data)
+
+    def test_transaction_list_invalid_date_format(self, mock_get_usage):
+        """Test date format validation in transaction list"""
+        mock_get_usage.return_value = {"should_limit": False}
+        invalid_dates = [
+            {"from_date": "invalid-date"},
+            {"from_date": "2024-02-17", "to_date": "invalid-date"},
+            {
+                "from_date": "2024-02-17T00:00:00Z",
+                "to_date": "2024-02-16T00:00:00Z",
+            },  # from_date after to_date
+        ]
+
+        for params in invalid_dates:
+            response = self.client.get(
+                reverse("transaction-list"), params, format="json"
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_valid_wallet_format(self, mock_get_usage):
+        """Test valid wallet address format"""
+        mock_get_usage.return_value = {"should_limit": False}
+        valid_wallet = "0x" + "a" * 40
+        mock_tx_hash = (
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+        )
+
+        # Mock necessary dependencies
+        with patch("faucet.views.Web3") as mock_web3:
+            # Mock transaction count and gas price
+            mock_web3.return_value.eth.get_transaction_count.return_value = 1
+            mock_web3.return_value.eth.gas_price = 20000000000
+
+            # Mock transaction hash
+            mock_tx = MagicMock()
+            mock_tx.hex.return_value = mock_tx_hash[
+                2:
+            ]  # Remove '0x' prefix for the mock
+            mock_web3.return_value.eth.send_raw_transaction.return_value = mock_tx
+
+            # Mock account
+            mock_account = MagicMock()
+            mock_account.sign_transaction.return_value = MagicMock()
+            mock_web3.return_value.eth.account.from_key.return_value = mock_account
+
+            response = self.client.post(
+                reverse("faucet-fund"), {"wallet_address": valid_wallet}, format="json"
+            )
+
+            self.assertNotEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data["transaction_hash"], mock_tx_hash[2:])
+
+
+class TransactionSerializerTests(TestCase):
+    def setUp(self):
+        self.valid_data = {
+            "transaction_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", # noqa
+            "wallet_address": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+            "amount": Decimal("0.1"),
+            "status": "success",
+            "created_at": timezone.now(),
+        }
+
+    def test_valid_transaction(self):
+        """Test serializer with valid data"""
+        serializer = TransactionSerializer(data=self.valid_data)
+        self.assertTrue(serializer.is_valid())
+
+    def test_invalid_transaction_hash(self):
+        """Test transaction hash validation"""
+        invalid_hashes = [
+            "1234567890abcdef",  # No 0x prefix
+            "0xinvalid",  # Invalid hex
+            "0x" + "g" * 64,  # Invalid hex character
+        ]
+
+        for hash in invalid_hashes:
+            data = self.valid_data.copy()
+            data["transaction_hash"] = hash
+            serializer = TransactionSerializer(data=data)
+            self.assertFalse(serializer.is_valid())
+            self.assertIn("transaction_hash", serializer.errors)
+
+    def test_invalid_wallet_address(self):
+        """Test wallet address validation"""
+        invalid_addresses = [
+            "1234567890abcdef",  # No 0x prefix
+            "0xinvalid",  # Too short
+            "0x" + "g" * 40,  # Invalid hex
+        ]
+
+        for address in invalid_addresses:
+            data = self.valid_data.copy()
+            data["wallet_address"] = address
+            serializer = TransactionSerializer(data=data)
+            self.assertFalse(serializer.is_valid())
+            self.assertIn("wallet_address", serializer.errors)
+
+    def test_invalid_amount(self):
+        """Test amount validation"""
+        invalid_amounts = [
+            0,  # Zero
+            -1,  # Negative
+            -0.1,  # Negative decimal
+        ]
+
+        for amount in invalid_amounts:
+            data = self.valid_data.copy()
+            data["amount"] = amount
+            serializer = TransactionSerializer(data=data)
+            self.assertFalse(serializer.is_valid())
+            self.assertIn("amount", serializer.errors)
+
+    def test_invalid_status(self):
+        """Test status validation"""
+        invalid_statuses = [
+            "pending",  # Not in valid choices
+            "error",  # Not in valid choices
+            "",  # Empty
+        ]
+
+        for _status in invalid_statuses:
+            data = self.valid_data.copy()
+            data["status"] = _status
+            serializer = TransactionSerializer(data=data)
+            self.assertFalse(serializer.is_valid())
+            self.assertIn("status", serializer.errors)
+
+    def test_empty_transaction_hash(self):
+        """Test that empty transaction hash is allowed (for failed transactions)"""
+        data = self.valid_data.copy()
+        data["transaction_hash"] = ""
+        data["status"] = "failed"
+        serializer = TransactionSerializer(data=data)
+        self.assertTrue(serializer.is_valid())

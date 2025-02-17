@@ -5,29 +5,50 @@ from django.utils import timezone
 from datetime import timedelta
 from web3 import Web3
 from decouple import config
-from django_ratelimit.decorators import ratelimit
+from django_ratelimit.core import get_usage
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from .models import Transaction
-from .serializers import (
-    WalletAddressSerializer,
-    StatsSerializer,
-    TransactionSerializer,
-)  # noqa
-from rest_framework.permissions import AllowAny
 from django.utils.dateparse import parse_datetime
 from rest_framework.decorators import api_view, permission_classes
-from django.db.models import Q
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
+from .schemas import (
+    TransactionQueryParamsSerializer,
+    WalletRequestSerializer,
+    TransactionSerializer,
+)
+from rest_framework.permissions import BasePermission
 
 
+class AllowAnyPermission(BasePermission):
+    def has_permission(self, request, view):
+        return True
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class FaucetFundView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [AllowAnyPermission]
     authentication_classes = []
 
-    @method_decorator(csrf_exempt)
-    @method_decorator(ratelimit(key="ip", rate="1/m", method=["POST"]))
+    def get_ratelimit_exception_response(self, request):
+        """Custom rate limit exceeded response"""
+        return Response(
+            {"error": "Rate limit exceeded. Please wait before requesting again."},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    @extend_schema(
+        request=WalletRequestSerializer,
+        responses={200: dict, 400: dict, 429: dict},
+        description="Request Sepolia ETH to be sent to your wallet",
+    )
     def post(self, request):
-        serializer = WalletAddressSerializer(data=request.data)
+        # Check rate limit
+        usage = get_usage(request, group="faucet", key="ip", rate="1/m")
+        if usage and usage.get("should_limit", False):
+            return self.get_ratelimit_exception_response(request)
+
+        serializer = WalletRequestSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -96,8 +117,12 @@ class FaucetFundView(APIView):
 
 
 class FaucetStatsView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [AllowAnyPermission]
+    authentication_classes = []
 
+    @extend_schema(
+        responses={200: dict}, description="Get statistics about faucet usage"
+    )
     def get(self, request):
         # Get stats for the last 24 hours
         last_24h = timezone.now() - timedelta(hours=24)
@@ -118,8 +143,33 @@ class FaucetStatsView(APIView):
         return Response(stats, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter(
+            name="wallet",
+            description="Filter by wallet address",
+            required=False,
+            type=str,
+        ),
+        OpenApiParameter(
+            name="from_date",
+            description="Filter transactions after this date (ISO format)",
+            required=False,
+            type=OpenApiTypes.DATETIME,
+            location=OpenApiParameter.QUERY,
+        ),
+        OpenApiParameter(
+            name="to_date",
+            description="Filter transactions before this date (ISO format)",
+            required=False,
+            type=OpenApiTypes.DATETIME,
+            location=OpenApiParameter.QUERY,
+        ),
+    ],
+    responses={200: list, 400: dict},
+)
 @api_view(["GET"])
-@permission_classes([AllowAny])
+@permission_classes([AllowAnyPermission])
 def transaction_list(request):
     """
     List all transactions with optional filtering by date range and wallet address.
@@ -143,14 +193,14 @@ def transaction_list(request):
             else:
                 return Response(
                     {
-                        "error": "Invalid from_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"
+                        "error": "Invalid from_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"  # noqa
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         except (ValueError, TypeError):
             return Response(
                 {
-                    "error": "Invalid from_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"
+                    "error": "Invalid from_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"  # noqa
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -163,7 +213,7 @@ def transaction_list(request):
             else:
                 return Response(
                     {
-                        "error": "Invalid to_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"
+                        "error": "Invalid to_date format. Use ISO format (e.g., 2024-02-17T16:00:00Z)"  # noqa
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -177,6 +227,15 @@ def transaction_list(request):
 
     # Always order by created_at descending (newest first)
     queryset = queryset.order_by("-created_at")
+
+    # Validate query parameters
+    query_params_serializer = TransactionQueryParamsSerializer(
+        data=request.query_params
+    )
+    if not query_params_serializer.is_valid():
+        return Response(
+            query_params_serializer.errors, status=status.HTTP_400_BAD_REQUEST
+        )
 
     serializer = TransactionSerializer(queryset, many=True)
     return Response(serializer.data)
