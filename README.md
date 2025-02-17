@@ -1,5 +1,8 @@
 # Ethereum Sepolia Faucet API
 
+## Demo
+![Sepolia Faucet Demo](sepolia-faucet-demo.gif)
+
 A Django REST API service that provides a faucet for Sepolia testnet ETH. The service allows users to request small amounts of test ETH with built-in rate limiting and transaction tracking.
 Source of funds is from a pre-funded wallet that is used to fund the faucet and is configurable.
 
